@@ -1,0 +1,147 @@
+---
+title: "Toy_Sim"
+author: "Jun Lu"
+date: "2023-04-15"
+output: html_document
+---
+
+```{r}
+library(plyr)
+library(doParallel)
+library(foreach)
+cl = parallel::makeCluster(8)
+doParallel::registerDoParallel(cl)
+source("./optim.R")
+```
+
+
+# Linear Case 
+wrong outcome model coverage rate 0.927
+```{r}
+N = 2000
+r = foreach::foreach(i = 1:1000,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult")) %dopar% {
+  
+  data = gen_linear_data(-3.159180, N, 1)
+  est_list = rep(0, 1000)
+  
+  for (j in 1:1000) {
+  # Bayesian Bootstrapping Weighting for each obs
+  # Sample Selection 
+    # dir.weig = as.numeric(rdirichlet(1, rep(1.0, N))*N)
+    dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+    est_list[j] = optim_loss(data, dir.weig)
+  }
+    l = quantile(est_list, probs = 0.025)                      
+    u = quantile(est_list, probs = 0.975)                      
+  if (1 >= l & 1 <= u) {
+      cover = 1
+    } else {
+      cover = 0
+    }                       
+    cover
+                       }
+mean(r)
+```
+
+
+## (b) Correct outcome model coverage rate 0.946
+```{r}
+N = 2000
+r = foreach::foreach(i = 1:1000,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult")) %dopar% {
+  
+  data = gen_linear_data(-3.159180, N, 1)
+  est_list = rep(0, 1000)
+  
+  for (j in 1:1000) {
+  # Bayesian Bootstrapping Weighting for each obs
+  # Sample Selection 
+    # dir.weig = as.numeric(rdirichlet(1, rep(1.0, N))*N)
+    dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+    est_list[j] = optim_loss2(data, dir.weig)
+  }
+    l = quantile(est_list, probs = 0.025)                      
+    u = quantile(est_list, probs = 0.975)                      
+  if (1 >= l & 1 <= u) {
+      cover = 1
+    } else {
+      cover = 0
+    }                       
+    cover
+                       }
+mean(r)
+```
+
+
+
+# Nolinear Case
+## (a) wrong outcome model coverage rate 0.832
+```{r}
+N = 2000
+r = foreach::foreach(i = 1:1000,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult")) %dopar% {
+  
+  data = gen_nonlinear_data(-3.159180, N, 1)
+  est_list = rep(0, 1000)
+  
+  for (j in 1:1000) {
+  # Bayesian Bootstrapping Weighting for each obs
+  # Sample Selection 
+    # dir.weig = as.numeric(rdirichlet(1, rep(1.0, N))*N)
+    dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+    est_list[j] = optim_loss(data, dir.weig)
+  }
+    l = quantile(est_list, probs = 0.025)                      
+    u = quantile(est_list, probs = 0.975)                      
+  if (1 >= l & 1 <= u) {
+      cover = 1
+    } else {
+      cover = 0
+    }                       
+    cover
+                       }
+mean(r)
+```
+
+
+## (b) wrong outcome model but with correct interaction term between A and X coverage rate 0.94
+```{r}
+N = 2000
+r = foreach::foreach(i = 1:1000,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult")) %dopar% {
+  
+  data = gen_nonlinear_data(-3.159180, N, 1)
+  est_list = rep(0, 1000)
+  
+  for (j in 1:1000) {
+  # Bayesian Bootstrapping Weighting for each obs
+  # Sample Selection 
+    # dir.weig = as.numeric(rdirichlet(1, rep(1.0, N))*N)
+    dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+    est_list[j] = optim_loss3(data, dir.weig)
+  }
+    l = quantile(est_list, probs = 0.025)                      
+    u = quantile(est_list, probs = 0.975)                      
+  if (1 >= l & 1 <= u) {
+      cover = 1
+    } else {
+      cover = 0
+    }                       
+    cover
+                       }
+mean(r)
+```
+
+
+
+
+
+
+
+
+

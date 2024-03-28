@@ -1,0 +1,213 @@
+---
+title: "Bayesian Causal Inference"
+author: "Jun Lu"
+date: "2024-02-21"
+output: html_document
+---
+
+## Data Simulation
+```{r}
+library(plyr)
+library(doParallel)
+library(foreach)
+library(tidyverse)
+library(foreach)
+library(rstan)
+library(rBeta2009)
+library(tidyverse)
+cl = parallel::makeCluster(8)
+doParallel::registerDoParallel(cl)
+source("./sim_f.R")
+```
+
+```{r}
+# ps_model = stan_model(file = "ps.stan")
+# outcome_model = stan_model(file = "om.stan")
+# saveRDS(outcome_model, file = "om.rds")
+# saveRDS(ps_model, file = "ps.rds")
+```
+
+```{r}
+prob = function(X1, X2, X3, theta0, theta1, theta2, theta3) {
+  1/(1 + exp(-(theta0 + X1*theta1 + X2*theta2 + X3*theta3)))
+}
+```
+
+
+
+# Correct outcome models
+0.95000000  0.26000000  0.96000000  0.97000000
+```{r}
+r1 = foreach::foreach(i = 1:100,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult", "tidyverse", "rstan")) %dopar% {
+    N = 2000
+    data = gen_data(N = N, b0 = -5.087, b1 = 1, b2 = 1, b3 = 1)
+    om = readRDS("om.rds")
+    ps = readRDS("ps.rds")
+    s_data = data[data$S == 1, ]
+    
+    om_input = list(
+        N1 = nrow(s_data),
+        Y = s_data$Y,
+        X1 = s_data$X1,
+        X2 = s_data$X2,
+        X3 = s_data$X3,
+        A = s_data$A
+      )
+    
+    ps_input = list(
+        N = nrow(data),
+        S = data$S,
+        X1 = data$X1,
+        X2 = data$X2,
+        X3 = data$X3
+      )
+    
+    om_fit = sampling(om, data = om_input,iter = 1500, chains = 2, warmup=1000)
+    ps_fit = sampling(ps, data = ps_input,iter = 1500, chains = 2, warmup=1000)
+    
+    om_post = extract(om_fit)
+    ps_post = extract(ps_fit)
+    
+    # OM
+    ate_post = om_post$gamma + om_post$delta1*mean(data$X1) + om_post$delta2*mean(data$X2)
+    ate_post2 = rep(0, 1000)
+    ate_post3 = rep(0, 1000)
+    ate_post4 = rep(0, 1000)
+    
+    
+    
+    # OM + PS
+    for (i in 1:1000) {
+      dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+      
+      probs = mapply(prob, data$X1, data$X2, data$X3, ps_post$theta0[i], ps_post$theta1[i], 
+             ps_post$theta2[i], ps_post$theta3[i])
+      
+      ga1 = om_post$alpha[i] + om_post$beta1[i]*data$X2 + om_post$beta2[i]*data$X3 + om_post$gamma[i] + om_post$delta1[i]*data$X1 + om_post$delta2[i]*data$X2
+      
+      ga2 = om_post$alpha[i] + om_post$beta1[i]*data$X2 + om_post$beta2[i]*data$X3
+      
+      w1 = 2/probs*as.numeric(data$S==1)*as.numeric(data$A==1)
+      w2 = 2/probs*as.numeric(data$S==1)*as.numeric(data$A==0)
+      
+      ate_post2[i] = 1/sum(w1)*sum(w1*(data$Y-ga1) + (1-data$S)*ga1) - 1/sum(w2)*sum(w2*(data$Y-ga2) + (1-data$S)*ga2)
+      
+      ate_post3[i] = 1/sum(w1*dir.weig)*sum(dir.weig*(w1*(data$Y-ga1) + (1-data$S)*ga1)) - 1/sum(w2*dir.weig)*sum(dir.weig*(w2*(data$Y-ga2) + (1-data$S)*ga2))
+      
+      ate_post4[i] = om_post$gamma[i] + om_post$delta1[i]*mean(data$X1) + om_post$delta2[i]*mean(data$X2) +
+        +  1/sum(w1*dir.weig)*sum(dir.weig*(w1*(data$Y-ga1) + (1-data$S)*ga1)) - 1/sum(w2*dir.weig)*sum(dir.weig*(w2*(data$Y-ga2) + (1-data$S)*ga2)) - (om_post$gamma[i] + om_post$delta1[i]*mean(data$X1*dir.weig) + om_post$delta2[i]*mean(data$X2*dir.weig))
+    }
+    
+    # True value is 0
+    est1 = mean(ate_post)
+    est_ci = as.numeric((0 > quantile(ate_post, 0.025)) & (0 < quantile(ate_post, 0.975)))
+    est2 = mean(ate_post2)
+    est2_ci = as.numeric((0 > quantile(ate_post2, 0.025)) & (0 < quantile(ate_post2, 0.975)))
+    est3 = mean(ate_post3)
+    est3_ci = as.numeric((0 > quantile(ate_post3, 0.025)) & (0 < quantile(ate_post3, 0.975)))
+    est4 = mean(ate_post4)
+    est4_ci = as.numeric((0 > quantile(ate_post4, 0.025)) & (0 < quantile(ate_post4, 0.975)))
+    
+    re = c(est1, est2, est3, est4, est_ci, est2_ci, est3_ci, est4_ci)
+    re                
+                     }
+```
+
+
+
+
+
+
+
+```{r}
+start_time <- Sys.time()
+
+r3 = foreach::foreach(i = 1:1000,
+                     .combine = rbind,
+                     .packages = c("glmnet", "dirmult", "tidyverse", "rstan")) %dopar% {
+    N = 10000
+    data = gen_data3(N = N, b0 = -5.087, b1 = 1, b2 = 1, b3 = 1)
+    om = readRDS("om.rds")
+    ps = readRDS("ps.rds")
+    s_data = data[data$S == 1, ]
+    
+    om_input = list(
+        N1 = nrow(s_data),
+        Y = s_data$Y,
+        X1 = s_data$X1,
+        X2 = s_data$X2,
+        X3 = s_data$X3,
+        A = s_data$A
+      )
+    
+    ps_input = list(
+        N = nrow(data),
+        S = data$S,
+        X1 = data$X1,
+        X2 = data$X2,
+        X3 = data$X3
+      )
+    
+    om_fit = sampling(om, data = om_input,iter = 2000, chains = 1, warmup=1000)
+    ps_fit = sampling(ps, data = ps_input,iter = 2000, chains = 1, warmup=1000)
+    
+    om_post = extract(om_fit)
+    ps_post = extract(ps_fit)
+    
+    # OM
+    ate_post2 = rep(0, 1000)
+    ate_post3 = rep(0, 1000)
+    
+    probs_mean = mapply(prob, data$X1, data$X2, data$X3, mean(ps_post$theta0), 
+                          mean(ps_post$theta1), mean(ps_post$theta2), mean(ps_post$theta3))
+    
+    w1_mean = 2/probs_mean*as.numeric(data$S==1)*as.numeric(data$A==1)
+    w2_mean = 2/probs_mean*as.numeric(data$S==1)*as.numeric(data$A==0)
+
+    
+    # OM + PS
+    for (i in 1:1000) {
+      dir.weig = as.numeric(rmultinom(1, N, rep(1.0/N, N)))
+      
+      probs = mapply(prob, data$X1, data$X2, data$X3, ps_post$theta0[i], ps_post$theta1[i], 
+             ps_post$theta2[i], ps_post$theta3[i])
+      
+      ga1 = om_post$alpha[i] + om_post$beta1[i]*data$X2 + om_post$beta2[i]*data$X3 + om_post$gamma[i] +  om_post$delta2[i]*data$X2
+      
+      ga2 = om_post$alpha[i] + om_post$beta1[i]*data$X2 + om_post$beta2[i]*data$X3
+      
+      w1 = 2/probs*as.numeric(data$S==1)*as.numeric(data$A==1)
+      w2 = 2/probs*as.numeric(data$S==1)*as.numeric(data$A==0)
+      
+      
+      ate_post2[i] = 1/sum(dir.weig)*sum(dir.weig*(w1*(data$Y-ga1) + ga1)) - 1/sum(dir.weig)*sum(dir.weig*(w2*(data$Y-ga2) + ga2))
+      
+      ate_post3[i] = 1/sum(w1*dir.weig)*sum(dir.weig*w1*data$Y)-1/sum(w2*dir.weig)*sum(dir.weig*w2*data$Y)
+      
+                                                      
+    }
+    
+    # True value is 0
+    est2 = mean(ate_post2)
+    est2_ci = as.numeric((9 > quantile(ate_post2, 0.025)) & (9 < quantile(ate_post2, 0.975)))
+    
+    est3 = mean(ate_post3)
+    est3_ci = as.numeric((9 > quantile(ate_post3, 0.025)) & (9 < quantile(ate_post3, 0.975)))
+    
+    
+   
+    re = c(est2, est3,
+           est2_ci, est3_ci)
+    re                
+                     }
+
+end_time <- Sys.time()
+execution_time <- end_time - start_time
+colMeans(r3)
+```
+
+
+
+f2dx
